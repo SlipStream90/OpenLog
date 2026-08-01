@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Dark-mode-first (PRD section 20). The light values exist only so the tokens
+ * are complete; `<html>` is hard-set to `dark` in layout.tsx because there is no
+ * theme switcher in this milestone's scope.
+ *
+ * Palette is zinc-based, in the Vercel/Linear/Raycast register the PRD names.
+ * `--success` is the one addition: watcher-health and test-pass counts need a
+ * positive-signal color distinct from the neutral `--accent` (hover/surface)
+ * token, matching the green run/pass convention those tools use.
+ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --success: 142 71% 35%;
+    --success-foreground: 0 0% 98%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 6% 8.5%;
+    --card-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --success: 142 69% 45%;
+    --success-foreground: 144 61% 8%;
+    --destructive: 0 62.8% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  /* Tabular figures for anything numeric -- stat cards, table columns -- so
+     digits don't shift width as data changes (skill guidance: number-tabular). */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Subtle top-of-page glow, the one department Vercel/Linear/Raycast all
+     share: a soft radial highlight instead of a flat single-color background.
+     Fixed + behind content, so it never affects layout or scroll. */
+  .bg-grid-fade {
+    background-image: radial-gradient(
+      ellipse 80% 50% at 50% -10%,
+      hsl(var(--accent) / 0.35),
+      transparent
+    );
+  }
+}

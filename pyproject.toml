@@ -1,0 +1,37 @@
+[project]
+name = "ai-observatory"
+version = "0.1.0"
+description = "The observability layer for AI coding agents. 100% local-first."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# Runtime dependencies are deliberately minimal. Note what is NOT here: no requests,
+# no httpx, no aiohttp. Nothing in backend/ is permitted to import an HTTP client
+# capable of an outbound call (ARCHITECTURE.md section 6, PRD section 21).
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+# httpx appears here and ONLY here: starlette's TestClient requires it as a transport.
+# It is a test-time dependency, never imported by anything under backend/. The
+# test suite includes an explicit regression guard (tests/test_api.py) asserting
+# no non-localhost socket connection is ever attempted.
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+ai-observatory-hook = "backend.adapters.claude.hook_handler:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
