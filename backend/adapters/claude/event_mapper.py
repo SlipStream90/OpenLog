@@ -27,15 +27,15 @@ from typing import Any
 
 from backend.shared.events import EventSource, EventType, UniversalEvent
 from backend.shared.mapping import (
-    coerce_int as _coerce_int,
+    ToolVocabulary,
     detect_framework,
-    estimate_line_delta as _estimate_line_delta,
+    dispatch_hook_payload,
+    hook_context,
     make_probe,
-    parse_usage as _parse_usage,
-    relative_file as _relative_file,
+    make_build,
+    map_tool_use_event,
+    transcript_response,
 )
-from backend.shared.sanitize import sanitize_command
-from backend.shared.timeutil import parse_timestamp, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,8 @@ WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit", "Update"}
 #: Shell execution.
 SHELL_TOOLS = frozenset({"Bash", "BashOutput", "Shell"})
 
+TOOL_VOCAB = ToolVocabulary(read=READ_TOOLS, write=WRITE_TOOLS, shell=SHELL_TOOLS)
+
 _TEST_PATTERN = re.compile(
     r"\b(pytest|jest|vitest|mocha|unittest|go\s+test|cargo\s+test|npm\s+(run\s+)?test|"
     r"yarn\s+test|pnpm\s+test|rspec|phpunit|dotnet\s+test|gradle\s+test|mvn\s+test)\b",
@@ -108,7 +110,17 @@ def _map_prompt_submit(payload: dict[str, Any], build, cwd) -> list[UniversalEve
 
 
 def _map_tool_use_hook(payload: dict[str, Any], build, cwd, normalized_hook: str) -> list[UniversalEvent]:
-    return _map_tool_use(payload, normalized_hook, cwd, build)
+    return map_tool_use_event(
+        payload,
+        normalized_hook,
+        cwd,
+        build,
+        vocab=TOOL_VOCAB,
+        probe=probe,
+        test_pattern=_TEST_PATTERN,
+        build_pattern=_BUILD_PATTERN,
+        git_pattern=_GIT_COMMIT_PATTERN,
+    )
 
 
 def _map_unknown_hook(payload: dict[str, Any], hook_name: str, build, cwd) -> list[UniversalEvent]:
@@ -154,136 +166,32 @@ def map_hook_payload(payload: dict[str, Any]) -> list[UniversalEvent]:
         logger.debug("Skipping unparseable hook payload")
         return []
 
+    ctx = hook_context(payload, probe, AGENT_NAME)
+    if ctx is None:
+        return []
+
     hook_name = probe(payload, "hook_event_name")
     if not isinstance(hook_name, str) or not hook_name:
         logger.debug("Hook payload with no identifiable hook name; skipping")
         return []
 
-    session_id = probe(payload, "session_id")
-    session_id = str(session_id) if session_id else None
+    # Hooks do not expose the model; transcripts enrich it.
+    build = make_build(ctx, AGENT_NAME)
 
-    received = payload.get("_received_at")
-    timestamp = parse_timestamp(
-        probe(payload, "timestamp"),
-        default=parse_timestamp(received) if received else utcnow(),
+    return dispatch_hook_payload(
+        payload,
+        hook_name,
+        build,
+        ctx.cwd,
+        vocab=TOOL_VOCAB,
+        probe=probe,
+        test_pattern=_TEST_PATTERN,
+        build_pattern=_BUILD_PATTERN,
+        git_pattern=_GIT_COMMIT_PATTERN,
+        resolve_hook=lambda name: name if name in _HOOK_DISPATCH else None,
+        dispatch=_HOOK_DISPATCH,
+        unknown_hook=_map_unknown_hook,
     )
-    cwd = probe(payload, "cwd")
-
-    def build(
-        event: EventType,
-        *,
-        file: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> UniversalEvent:
-        return UniversalEvent(
-            session_id=session_id or "",
-            timestamp=timestamp,
-            agent=AGENT_NAME,
-            event=event,
-            model=None,  # hooks do not expose the model; transcripts enrich it
-            file=file,
-            metadata=metadata or {},
-            source="hook",
-        )
-
-    normalized = hook_name.strip().lower().replace("_", "")
-
-    handler = _HOOK_DISPATCH.get(normalized)
-    if handler:
-        return handler(payload, build, cwd)
-
-    return _map_unknown_hook(payload, hook_name, build, cwd)
-
-
-def _map_tool_use(
-    payload: dict[str, Any],
-    normalized_hook: str,
-    cwd: Any,
-    build,
-) -> list[UniversalEvent]:
-    tool_name = probe(payload, "tool_name")
-    if not isinstance(tool_name, str):
-        return []
-
-    tool_input = probe(payload, "tool_input") or {}
-    if not isinstance(tool_input, dict):
-        tool_input = {}
-    is_post = normalized_hook == "posttooluse"
-
-    if tool_name in READ_TOOLS and not is_post:
-        file = _relative_file(probe(tool_input, "file_path"), cwd)
-        if file is None:
-            return []
-        return [build(EventType.FILE_OPENED, file=file)]
-
-    if tool_name in WRITE_TOOLS and is_post:
-        file = _relative_file(probe(tool_input, "file_path"), cwd)
-        if file is None:
-            return []
-        added, removed = _estimate_line_delta(tool_input)
-        return [
-            build(
-                EventType.FILE_MODIFIED,
-                file=file,
-                metadata={"lines_added": added, "lines_removed": removed},
-            )
-        ]
-
-    if tool_name in SHELL_TOOLS and is_post:
-        return _map_shell_command(payload, tool_input, build)
-
-    return []
-
-
-def _map_shell_command(
-    payload: dict[str, Any], tool_input: dict[str, Any], build
-) -> list[UniversalEvent]:
-    command = probe(tool_input, "command")
-    if not isinstance(command, str) or not command.strip():
-        return []
-    # Redact secrets before anything is stored: PRD section 21. Framework /
-    # build / git classification below only matches tool names, never secret
-    # values, so it is unaffected by redaction.
-    command = sanitize_command(command.strip()) or ""
-
-    response = probe(payload, "tool_response")
-    exit_code = None
-    if isinstance(response, dict):
-        exit_code = _coerce_int(probe(response, "exit_code"))
-
-    events = [
-        build(
-            EventType.TERMINAL_COMMAND,
-            metadata={"command": command, "exit_code": exit_code},
-        )
-    ]
-
-    framework = detect_test_framework(command)
-    if framework is not None:
-        meta = {"command": command, "framework": framework}
-        if exit_code is None:
-            # Outcome genuinely unknown -- record that a test ran, but do not
-            # invent a pass. A fabricated pass would corrupt the Tests metric.
-            events.append(build(EventType.TEST_EXECUTED, metadata=meta))
-        elif exit_code == 0:
-            events.append(build(EventType.TEST_PASSED, metadata=meta))
-        else:
-            events.append(build(EventType.TEST_FAILED, metadata=meta))
-        return events
-
-    if _GIT_COMMIT_PATTERN.search(command):
-        # Subject line only -- never the diff (data_models.md section 2).
-        events.append(build(EventType.GIT_COMMIT, metadata={"message": None}))
-        return events
-
-    if _BUILD_PATTERN.search(command):
-        meta = {"command": command}
-        events.append(build(EventType.BUILD_STARTED, metadata=meta))
-        if exit_code is not None:
-            events.append(build(EventType.BUILD_FINISHED, metadata=meta))
-        return events
-
-    return events
 
 
 # `_estimate_line_delta` is `backend.shared.mapping.estimate_line_delta`
@@ -323,27 +231,13 @@ def map_transcript_record(record: dict[str, Any]) -> list[UniversalEvent]:
     if not isinstance(usage, dict) and model is None:
         return []
 
-    token_count, input_tokens, output_tokens = _parse_usage(usage)
-
-    timestamp = parse_timestamp(probe(record, "timestamp"))
-
-    return [
-        UniversalEvent(
-            session_id=str(session_id),
-            timestamp=timestamp,
-            agent=AGENT_NAME,
-            event=EventType.RESPONSE_RECEIVED,
-            model=str(model) if model else None,
-            file=None,
-            metadata={
-                "token_count": token_count,
-                "model": str(model) if model else None,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-            },
-            source="transcript",
-        )
-    ]
+    return transcript_response(
+        session_id=session_id,
+        record_timestamp=probe(record, "timestamp"),
+        agent_name=AGENT_NAME,
+        model=model,
+        usage=usage,
+    )
 
 
 def map_payload(payload: dict[str, Any], source: EventSource) -> list[UniversalEvent]:
