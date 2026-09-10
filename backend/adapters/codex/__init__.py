@@ -1,6 +1,6 @@
-"""Codex CLI adapter -- placeholder only.
+"""Codex CLI adapter (PRD sections 8, 10, 18).
 
-Deliberately empty. The Codex adapter is out of scope for this mission
-(MISSION_BRIEF.md line 10); implementing a stub here would be a fabricated
-capability, which PRD.md section 4 explicitly rejects.
+Normalizes Codex hook + session payloads into Universal Events. Schema
+assumptions are [UNVERIFIED] -- see `event_mapper.py`; all agent-specific
+parsing stops at this package boundary.
 """

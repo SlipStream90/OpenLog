@@ -20,8 +20,10 @@ export interface SessionSummary {
   command_count: number;
   token_count: number;
   estimated_cost: number;
-  /** Always null until Milestone 3. The UI renders "N/A", never a number. */
+  /** Deterministic 0-100 score, or null when the session has no evidence. Never a fabricated 0. */
   productivity: number | null;
+  /** Per-factor reasons behind the score ("+10 session completed"). */
+  productivity_reasons: string[];
 }
 
 export interface SessionDetail extends SessionSummary {
@@ -195,4 +197,16 @@ export function exportHref(
   format: "json" | "csv",
 ): string {
   return `${API_BASE}/export?table=${table}&format=${format}`;
+}
+
+export interface Recommendation {
+  rule_id: string;
+  severity: "warning" | "suggestion" | "info" | string;
+  message: string;
+  metric: Record<string, unknown>;
+}
+
+export async function fetchRecommendations(): Promise<Recommendation[]> {
+  const body = await getJson<{ recommendations: Recommendation[] }>("/recommendations");
+  return body.recommendations;
 }

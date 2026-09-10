@@ -1,6 +1,27 @@
-"""Analytics engine -- placeholder for Milestone 3.
+"""Analytics engine: productivity scoring and recommendations.
 
-Deliberately empty. No productivity scoring, no recommendation rules, not even a
-stub formula: PRD.md section 4 is explicit that a fabricated-looking placeholder
-is worse than an honest gap.
+Milestone 3, implemented deterministically: every number is explainable and
+every recommendation links back to its triggering metric. No ML, no network.
 """
+
+from backend.analytics.productivity import (
+    ScoredProductivity,
+    SessionFactors,
+    score_session,
+)
+from backend.analytics.recommendations import (
+    Recommendation,
+    RecommendationContext,
+    build_context,
+    recommend,
+)
+
+__all__ = [
+    "ScoredProductivity",
+    "SessionFactors",
+    "score_session",
+    "Recommendation",
+    "RecommendationContext",
+    "build_context",
+    "recommend",
+]

@@ -72,6 +72,14 @@ def kilocode_hook_queue_path() -> Path:
     return logs_dir() / "kilocode_hooks.jsonl"
 
 
+def codex_hook_queue_path() -> Path:
+    """Queue file for Codex CLI hooks."""
+    override = os.environ.get("CODEX_HOOK_QUEUE")
+    if override:
+        return Path(override).expanduser()
+    return logs_dir() / "codex_hooks.jsonl"
+
+
 def tailer_state_path() -> Path:
     """Persisted `{file_path: byte_offset}` map (ADR-002)."""
     return cache_dir() / "tailer_state.json"
@@ -133,9 +141,32 @@ def kilocode_transcript_root() -> Path:
     return candidates[0] if candidates else Path.home() / ".config" / "Code" / "User" / "globalStorage" / "kilocode.kilo-code"
 
 
+def codex_transcript_root() -> Path:
+    """Where Codex CLI writes session JSONL.
+
+    [UNVERIFIED] inferred (`~/.codex/sessions`), not confirmed against a live
+    install. Override with CODEX_TRANSCRIPT_ROOT for tests or custom installs.
+    """
+    override = os.environ.get("CODEX_TRANSCRIPT_ROOT")
+    if override:
+        return Path(override).expanduser()
+    for cand in (
+        Path.home() / ".codex" / "sessions",
+        Path.home() / ".codex",
+    ):
+        if cand.is_dir():
+            return cand
+    return Path.home() / ".codex" / "sessions"
+
+
 def all_hook_queue_paths() -> list[Path]:
     """All known queue files — used by telemetry to watch every agent."""
-    return [hook_queue_path(), opencode_hook_queue_path(), kilocode_hook_queue_path()]
+    return [
+        hook_queue_path(),
+        opencode_hook_queue_path(),
+        kilocode_hook_queue_path(),
+        codex_hook_queue_path(),
+    ]
 
 
 def ensure_directories() -> None:

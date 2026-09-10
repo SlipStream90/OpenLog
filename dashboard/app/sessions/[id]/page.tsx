@@ -4,6 +4,7 @@ import {
   Clock3,
   DollarSign,
   FileEdit,
+  Gauge,
   GitCommitHorizontal,
   Hash,
   ListTree,
@@ -39,6 +40,7 @@ const agentBadge: Record<string, string> = {
   claude: "bg-orange-500/10 text-orange-400 border-orange-500/20",
   opencode: "bg-primary/10 text-primary border-primary/20",
   kilocode: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  codex: "bg-sky-500/10 text-sky-400 border-sky-500/20",
 };
 
 export default async function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -62,6 +64,12 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
     { label: "Tests failed", value: formatNumber(session.test_fail_count), icon: XCircle, hint: "check logs" },
     { label: "Commits", value: formatNumber(session.commit_count), icon: GitCommitHorizontal, hint: "git" },
     { label: "Cost", value: formatCost(session.estimated_cost), icon: DollarSign, hint: "estimated" },
+    {
+      label: "Productivity",
+      value: session.productivity === null || session.productivity === undefined ? "N/A" : String(Math.round(session.productivity)),
+      icon: Gauge,
+      hint: "0–100",
+    },
   ];
 
   return (
@@ -170,6 +178,28 @@ export default async function SessionDetailPage({ params }: { params: Promise<{ 
               <p className="mt-1 text-sm font-medium">All sessions table supports “claude / opencode / kilo” pills.</p>
             </CardContent>
           </Card>
+          {session.productivity_reasons && session.productivity_reasons.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Gauge className="size-4" />
+                  Why this score
+                </CardTitle>
+                <CardDescription className="font-mono text-xs">
+                  Deterministic factors — every point is explainable.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-1.5">
+                  {session.productivity_reasons.map((reason) => (
+                    <li key={reason} className="font-mono text-xs tabular-nums text-muted-foreground">
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </section>
     </div>

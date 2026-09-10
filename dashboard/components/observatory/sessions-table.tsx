@@ -37,7 +37,7 @@ export function SessionsTable({
     );
   }, [sessions, query]);
 
-  const pills = ["all", "claude", "opencode", "kilocode"];
+  const pills = ["all", "claude", "opencode", "kilocode", "codex"];
   const dateParam = initialDate ? `&date=${encodeURIComponent(initialDate)}` : "";
 
   if (sessions.length === 0) {
@@ -123,6 +123,7 @@ export function SessionsTable({
               <TableHead className="text-right">Commands</TableHead>
               <TableHead className="text-right">Tokens</TableHead>
               <TableHead className="text-right">Cost</TableHead>
+              <TableHead className="text-right">Productivity</TableHead>
               <TableHead className="text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
@@ -146,6 +147,23 @@ export function SessionsTable({
                 <TableCell className="text-right font-mono tabular-nums text-xs">{formatNumber(session.command_count)}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums text-xs">{formatNumber(session.token_count)}</TableCell>
                 <TableCell className="text-right font-mono tabular-nums text-xs">{formatCost(session.estimated_cost)}</TableCell>
+                <TableCell className="text-right font-mono tabular-nums text-xs">
+                  {session.productivity === null || session.productivity === undefined ? (
+                    <span className="text-muted-foreground">N/A</span>
+                  ) : (
+                    <span
+                      className={
+                        session.productivity >= 70
+                          ? "text-emerald-500"
+                          : session.productivity >= 40
+                            ? "text-amber-500"
+                            : "text-destructive"
+                      }
+                    >
+                      {Math.round(session.productivity)}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right">
                   <Link href={`/sessions/${encodeURIComponent(session.id)}`} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
                     replay <ArrowUpRight className="size-3" />

@@ -16,7 +16,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routers import analytics, charts, export, files, search, sessions, stats, timeline
+from backend.api.routers import (
+    analytics,
+    charts,
+    export,
+    files,
+    recommendations,
+    search,
+    sessions,
+    stats,
+    timeline,
+)
 from backend.database.session import init_db
 from backend.telemetry import TelemetryEngine
 
@@ -86,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(charts.router)
     app.include_router(analytics.router)
+    app.include_router(recommendations.router)
     app.include_router(export.router)
     return app
 

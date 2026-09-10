@@ -35,9 +35,12 @@ class SessionSummary(_Base):
     command_count: int = 0
     token_count: int = 0
     estimated_cost: float = 0.0
-    #: Always null this mission. Productivity scoring is Milestone 3; the
-    #: dashboard renders "N/A". Never a fabricated number (PRD.md section 4).
+    #: Deterministic 0-100 score from backend/analytics/productivity.py, or
+    #: None when the session has no scorable evidence (never a fabricated 0).
     productivity: float | None = None
+    #: The per-factor reasons behind `productivity` ("+10 session completed").
+    #: Empty when unscored. Powers the "why" UI on the session detail page.
+    productivity_reasons: list[str] = []
 
     @field_serializer("start_time", "end_time")
     def _ser_dt(self, value: datetime | None, _info) -> str | None:

@@ -7,6 +7,7 @@ import {
   DollarSign,
   FileEdit,
   FlaskConical,
+  Lightbulb,
   Search,
   Terminal,
   Timer,
@@ -24,6 +25,7 @@ import {
   fetchCommandStats,
   fetchFiles,
   fetchPromptStats,
+  fetchRecommendations,
   fetchSessions,
   fetchStats,
 } from "@/lib/api";
@@ -41,19 +43,21 @@ export default async function HomePage() {
 
   // Everything else is optional: a failure here degrades one section, never
   // the whole page (PRD section 25).
-  const [sessionsRes, filesRes, chartsRes, promptsRes, commandsRes] =
+  const [sessionsRes, filesRes, chartsRes, promptsRes, commandsRes, recsRes] =
     await Promise.allSettled([
       fetchSessions(),
       fetchFiles(),
       fetchCharts("7d"),
       fetchPromptStats(),
       fetchCommandStats(),
+      fetchRecommendations(),
     ]);
   const sessions = sessionsRes.status === "fulfilled" ? sessionsRes.value : null;
   const files = filesRes.status === "fulfilled" ? filesRes.value : [];
   const chartPoints = chartsRes.status === "fulfilled" ? chartsRes.value : [];
   const promptStats = promptsRes.status === "fulfilled" ? promptsRes.value : null;
   const commandStats = commandsRes.status === "fulfilled" ? commandsRes.value : null;
+  const recommendations = recsRes.status === "fulfilled" ? recsRes.value : [];
 
   // Agent breakdown from sessions (client-side aggregation for display)
   const byAgent: Record<string, number> = {};
@@ -124,12 +128,13 @@ export default async function HomePage() {
         </div>
       )}
 
-      {/* Agent compatibility strip — showcases opencode/kilocode support */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* Agent compatibility strip */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { agent: "claude", title: "Claude Code", desc: "Hooks + transcripts", color: "border-orange-500/20 bg-orange-500/5" },
           { agent: "opencode", title: "OpenCode", desc: "SSE hooks + JSONL", color: "border-primary/20 bg-primary/5" },
           { agent: "kilocode", title: "Kilo Code", desc: "VS Code extension", color: "border-violet-500/20 bg-violet-500/5" },
+          { agent: "codex", title: "Codex CLI", desc: "Hooks + sessions", color: "border-sky-500/20 bg-sky-500/5" },
         ].map((a) => (
           <div key={a.agent} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${a.color}`}>
             <div className="grid size-9 place-items-center rounded-lg bg-background">
@@ -264,6 +269,55 @@ export default async function HomePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Insights */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Lightbulb className="size-4" />
+            Insights
+          </CardTitle>
+          <CardDescription className="font-mono text-xs">
+            Rule-based, linked to the metric behind each one
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {recommendations.length === 0 ? (
+            <p className="font-mono text-xs text-muted-foreground">
+              Nothing to flag — keep coding and check back after a few sessions.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {recommendations.map((r) => (
+                <li
+                  key={r.rule_id}
+                  className={`rounded-lg border px-4 py-3 ${
+                    r.severity === "warning"
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : r.severity === "info"
+                        ? "border-sky-500/20 bg-sky-500/5"
+                        : "border-border bg-card"
+                  }`}
+                >
+                  <p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span
+                      className={`inline-block size-1.5 rounded-full ${
+                        r.severity === "warning"
+                          ? "bg-amber-500"
+                          : r.severity === "info"
+                            ? "bg-sky-500"
+                            : "bg-primary"
+                      }`}
+                    />
+                    {r.severity} • {r.rule_id}
+                  </p>
+                  <p className="mt-1 text-sm">{r.message}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Export */}
       <Card className="bg-secondary/40 shadow-none">

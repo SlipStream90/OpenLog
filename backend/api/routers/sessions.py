@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession
 
+from backend.analytics.productivity import ScoredProductivity, SessionFactors, score_session
 from backend.api.schemas import SessionDetail, SessionListResponse, SessionSummary
-from backend.database.models import Command, Event, FileRecord, Session
+from backend.database.models import Command, Event, FileRecord, Prompt, Session
 from backend.database.session import as_utc, get_db
 from backend.shared.events import EventType
 
@@ -32,7 +33,13 @@ def _counts_by_session(db: SASession, model, session_id: str | None = None) -> d
     return {row[0]: row[1] for row in db.execute(stmt).all()}
 
 
-def _to_summary(row: Session, file_counts: dict, command_counts: dict) -> SessionSummary:
+def _to_summary(
+    row: Session,
+    file_counts: dict,
+    command_counts: dict,
+    productivity: dict[str, ScoredProductivity | None] | None = None,
+) -> SessionSummary:
+    scored = (productivity or {}).get(row.id)
     return SessionSummary(
         id=row.id,
         agent=row.agent,
@@ -44,8 +51,58 @@ def _to_summary(row: Session, file_counts: dict, command_counts: dict) -> Sessio
         command_count=command_counts.get(row.id, 0),
         token_count=row.token_count or 0,
         estimated_cost=row.estimated_cost or 0.0,
-        productivity=None,  # Milestone 3 -- never a placeholder number
+        productivity=float(scored.score) if scored is not None else None,
+        productivity_reasons=list(scored.reasons) if scored is not None else [],
     )
+
+
+def _productivity_for(db: SASession, rows: list[Session]) -> dict[str, ScoredProductivity | None]:
+    """Score every listed session from grouped aggregates (3 queries total)."""
+    ids = [row.id for row in rows]
+    if not ids:
+        return {}
+
+    type_counts: dict[tuple[str, str], int] = {
+        (sid, etype): count
+        for sid, etype, count in db.execute(
+            select(Event.session_id, Event.event_type, func.count())
+            .where(Event.session_id.in_(ids))
+            .group_by(Event.session_id, Event.event_type)
+        ).all()
+    }
+    prompt_stats: dict[str, tuple[int, float]] = {
+        sid: (count, float(avg or 0.0))
+        for sid, count, avg in db.execute(
+            select(Prompt.session_id, func.count(), func.avg(Prompt.prompt_length))
+            .where(Prompt.session_id.in_(ids))
+            .group_by(Prompt.session_id)
+        ).all()
+    }
+    file_rows: dict[str, int] = _counts_by_session(db, FileRecord)
+
+    def count(sid: str, event: EventType) -> int:
+        return type_counts.get((sid, event.value), 0)
+
+    scored: dict[str, ScoredProductivity | None] = {}
+    for row in rows:
+        prompt_count, prompt_avg = prompt_stats.get(row.id, (0, 0.0))
+        scored[row.id] = score_session(
+            SessionFactors(
+                completed=row.end_time is not None,
+                duration_seconds=row.duration or 0.0,
+                commits=count(row.id, EventType.GIT_COMMIT),
+                tests_passed=count(row.id, EventType.TEST_PASSED),
+                tests_failed=count(row.id, EventType.TEST_FAILED),
+                tests_executed=count(row.id, EventType.TEST_EXECUTED),
+                prompts=prompt_count,
+                avg_prompt_length=prompt_avg,
+                distinct_files=file_rows.get(row.id, 0),
+                edits=count(row.id, EventType.FILE_MODIFIED),
+                errors=count(row.id, EventType.ERROR),
+                commands=count(row.id, EventType.TERMINAL_COMMAND),
+            )
+        )
+    return scored
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -80,8 +137,11 @@ def list_sessions(
     rows = db.execute(stmt).scalars().all()
     file_counts = _counts_by_session(db, FileRecord)
     command_counts = _counts_by_session(db, Command)
+    productivity = _productivity_for(db, list(rows))
     return SessionListResponse(
-        sessions=[_to_summary(row, file_counts, command_counts) for row in rows]
+        sessions=[
+            _to_summary(row, file_counts, command_counts, productivity) for row in rows
+        ]
     )
 
 
@@ -94,7 +154,7 @@ def get_session(session_id: str, db: SASession = Depends(get_db)) -> SessionDeta
 
     file_counts = _counts_by_session(db, FileRecord, session_id)
     command_counts = _counts_by_session(db, Command, session_id)
-    summary = _to_summary(row, file_counts, command_counts)
+    summary = _to_summary(row, file_counts, command_counts, _productivity_for(db, [row]))
 
     # One grouped query for all three event-type counts, rather than three.
     by_type = {

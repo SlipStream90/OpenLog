@@ -28,6 +28,12 @@ This registers `backend/adapters/claude/hook_handler.py` against the
 `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop` and
 `SessionEnd` hooks in `~/.claude/settings.json`.
 
+OpenCode, Kilo Code and Codex CLI have matching installers
+(`scripts/install_opencode_hooks.py`, `scripts/install_kilocode_hooks.py`,
+`scripts/install_codex_hooks.py`) with the same flags. Their hook payload
+and transcript schemas are **[UNVERIFIED]** -- probed broadly, degrading to
+nulls rather than crashes.
+
 The installer:
 
 - backs up your existing settings to `settings.json.bak` before writing,

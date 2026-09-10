@@ -94,8 +94,9 @@ def test_sessions_shape(client, seeded):
     assert row["command_count"] == 1
     assert row["token_count"] == 1540
     assert row["duration_seconds"] == pytest.approx(2700, abs=2)
-    # Productivity is null, never a number, until Milestone 3.
-    assert row["productivity"] is None
+    # Milestone 3: deterministic score with explainable reasons.
+    assert 0 <= row["productivity"] <= 100
+    assert any("completed" in r for r in row["productivity_reasons"])
     assert row["start_time"].endswith("Z")
 
 
@@ -110,7 +111,8 @@ def test_session_detail(client, seeded):
     assert body["test_pass_count"] == 1
     assert body["test_fail_count"] == 0
     assert body["commit_count"] == 1
-    assert body["productivity"] is None
+    assert 0 <= body["productivity"] <= 100
+    assert body["productivity_reasons"]
 
 
 def test_session_detail_404(client):
@@ -208,14 +210,10 @@ def test_stats_watcher_error_carries_no_traceback(client):
 # -- Scope guard ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/recommendations"])
+@pytest.mark.parametrize("path", ["/no-such-endpoint"])
 def test_out_of_scope_endpoints_are_not_implemented(client, path):
-    """Milestone 3 endpoints must not have crept in.
-
-    /charts and /search used to be on this list; they are implemented now
-    (read-only aggregations over existing tables) and covered in
-    test_new_endpoints.py.
-    """
+    """Unknown paths 404. (Every PRD §17 endpoint is now implemented --
+    see test_new_endpoints.py and test_recommendations.py.)"""
     assert client.get(path).status_code == 404
 
 

@@ -38,6 +38,12 @@ _SPECS: dict[str, dict[str, str]] = {
         "queue": "kilocode_hook_queue_path",
         "transcripts": "kilocode_transcript_root",
     },
+    "codex": {
+        "adapter": "backend.adapters.codex.adapter:CodexAdapter",
+        "reader": "backend.adapters.codex.transcript_reader",
+        "queue": "codex_hook_queue_path",
+        "transcripts": "codex_transcript_root",
+    },
 }
 
 

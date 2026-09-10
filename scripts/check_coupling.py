@@ -17,9 +17,10 @@ PRD and MISSION_BRIEF mandate:
   ``backend.shared``, ``backend.database`` and ``backend.adapters``, never
   ``backend.api``.
 * ``backend.api`` serves reads -- it may import ``backend.shared``,
-  ``backend.database``, ``backend.telemetry.watcher_status`` (health only)
-  and ``*.pricing`` (cost tables). Anything deeper (e.g. importing a whole
-  adapter or the ingestion pipeline) is a layering violation.
+  ``backend.database``, ``backend.analytics`` (scores/recommendations served
+  over HTTP per the PRD section 8 pipeline), ``backend.telemetry.watcher_status``
+  (health only) and ``*.pricing`` (cost tables). Anything deeper (e.g. importing
+  a whole adapter or the ingestion pipeline) is a layering violation.
 * No dependency cycles between top-level packages.
 
 Also reports fan-in/fan-out and instability (I = out / (in + out)) per
@@ -49,7 +50,7 @@ ALLOWED: dict[str, set[str]] = {
     "database": {"shared"},
     "adapters": {"shared"},
     "telemetry": {"shared", "database", "adapters", "telemetry"},
-    "api": {"shared", "database", "adapters-pricing", "telemetry-status"},
+    "api": {"shared", "database", "analytics", "adapters-pricing", "telemetry-status"},
     "analytics": {"shared", "database"},
 }
 

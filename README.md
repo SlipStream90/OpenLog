@@ -14,11 +14,9 @@ Alpha — local telemetry engine, Claude Code adapter, FastAPI backend, and a
 Next.js dashboard (dark-mode-first, shadcn/ui).
 
 **Already built:** session capture, timeline replay, file analytics, terminal
-analytics, prompt analytics, charts data, search, JSON/CSV export, watcher
-infrastructure, REST API.
-
-**Not yet built** (remaining): productivity scoring, recommendations,
-Codex CLI adapter.
+analytics, prompt analytics, productivity scoring, recommendations, charts
+data, search, JSON/CSV export, four agent adapters (Claude, OpenCode,
+Kilo Code, Codex), watcher infrastructure, REST API.
 
 ## Quick start
 
@@ -104,6 +102,7 @@ ai-observatory/
 | `GET /analytics/prompts` | Prompt count/avg/long-short split    |
 | `GET /analytics/commands` | Command totals/fail-rate/top        |
 | `GET /export?table=&format=` | Table download as JSON or CSV  |
+| `GET /recommendations` | Rule-based insights with metrics |
 
 ## Privacy
 
