@@ -208,9 +208,14 @@ def test_stats_watcher_error_carries_no_traceback(client):
 # -- Scope guard ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/charts", "/recommendations", "/search"])
+@pytest.mark.parametrize("path", ["/recommendations"])
 def test_out_of_scope_endpoints_are_not_implemented(client, path):
-    """Milestone 3/4 endpoints must not have crept in."""
+    """Milestone 3 endpoints must not have crept in.
+
+    /charts and /search used to be on this list; they are implemented now
+    (read-only aggregations over existing tables) and covered in
+    test_new_endpoints.py.
+    """
     assert client.get(path).status_code == 404
 
 
@@ -252,7 +257,18 @@ def test_no_outbound_network_connection_is_attempted(temp_home, seeded, monkeypa
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
 
     with TestClient(create_app()) as guarded_client:
-        for path in ("/sessions", f"/session/{seeded}", f"/timeline/{seeded}", "/files", "/stats"):
+        for path in (
+            "/sessions",
+            f"/session/{seeded}",
+            f"/timeline/{seeded}",
+            "/files",
+            "/stats",
+            "/search?q=test",
+            "/charts",
+            "/analytics/prompts",
+            "/analytics/commands",
+            "/export?table=sessions&format=json",
+        ):
             assert guarded_client.get(path).status_code == 200
 
     assert attempted == []

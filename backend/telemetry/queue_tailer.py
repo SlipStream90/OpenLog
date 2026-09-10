@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 
 from backend.shared import paths
@@ -24,6 +25,11 @@ POLL_INTERVAL_SECONDS = 1.0
 #: not spin the loop at full speed writing a log line every second.
 ERROR_BACKOFF_SECONDS = 15.0
 MAX_BYTES_PER_CYCLE = 2_000_000
+#: Drop the ingested prefix once the processed offset passes this size. Queue
+#: files hold *raw* hook payloads (prompt text, edit content), so bounding
+#: their size is a privacy measure as well as a disk one: the DB keeps only
+#: lengths/counts, and the queue must not become a permanent PII archive.
+COMPACT_THRESHOLD_BYTES = 2_000_000
 
 
 def read_new_lines(path: Path, offset: int) -> tuple[list[dict], int]:
@@ -67,29 +73,68 @@ def read_new_lines(path: Path, offset: int) -> tuple[list[dict], int]:
     return records, offset + len(complete)
 
 
+def compact_processed_prefix(
+    path: Path, offset: int, threshold: int = COMPACT_THRESHOLD_BYTES
+) -> int:
+    """Drop already-ingested bytes from the head of the queue file.
+
+    Returns the new valid offset (`0` after a compaction, else `offset`
+    unchanged). Skips unless the file is big enough *and* stable: the hook
+    handler appends concurrently, so if the file grew between the size check
+    and the tail read, the compaction is deferred to a later cycle rather
+    than risk dropping a freshly-appended line.
+    """
+    if offset < threshold:
+        return offset
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return offset
+    if size < offset:
+        # Shrunk (rotated externally); read_new_lines restarts from 0 itself.
+        return offset
+    try:
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            tail = handle.read()
+        if path.stat().st_size != size:
+            return offset
+        tmp = path.with_name(path.name + ".compact.tmp")
+        with tmp.open("wb") as handle:
+            handle.write(tail)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.warning("Could not compact queue file %s: %s", path, exc)
+        return offset
+    logger.info("Compacted queue file %s, reclaimed %d bytes", path, offset)
+    return 0
+
+
 class QueueTailer:
     """Watcher: hook queue file -> adapter -> ingestion queue."""
 
-    def __init__(self, adapter, pipeline, offsets: OffsetStore, path: Path | None = None):
+    def __init__(self, adapter, pipeline, offsets: OffsetStore, path: Path | None = None, name: str | None = None):
         self._adapter = adapter
         self._pipeline = pipeline
         self._offsets = offsets
         self._path = path if path is not None else paths.hook_queue_path()
+        self._name = name or NAME
 
     async def run(self) -> None:
-        registry.register(NAME)
-        logger.info("QueueTailer watching %s", self._path)
+        registry.register(self._name)
+        logger.info("QueueTailer %s watching %s", self._name, self._path)
         while True:
             try:
                 await self._poll_once()
-                registry.mark_success(NAME)
+                registry.mark_success(self._name)
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
             except asyncio.CancelledError:
-                registry.mark_stopped(NAME)
+                registry.mark_stopped(self._name)
                 raise
-            except Exception as exc:  # noqa: BLE001 -- isolation is the point
-                logger.exception("QueueTailer cycle failed; continuing")
-                registry.mark_failure(NAME, exc)
+            except Exception as exc:
+                logger.exception("QueueTailer %s cycle failed; continuing", self._name)
+                registry.mark_failure(self._name, exc)
                 await asyncio.sleep(ERROR_BACKOFF_SECONDS)
 
     async def _poll_once(self) -> None:
@@ -103,4 +148,11 @@ class QueueTailer:
 
         if new_offset != offset:
             self._offsets.set(self._path, new_offset)
+            await asyncio.to_thread(self._offsets.save)
+
+        compacted = await asyncio.to_thread(
+            compact_processed_prefix, self._path, new_offset
+        )
+        if compacted != new_offset:
+            self._offsets.set(self._path, compacted)
             await asyncio.to_thread(self._offsets.save)

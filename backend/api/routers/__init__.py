@@ -1,9 +1,27 @@
-"""FastAPI routers -- exactly the five endpoints MISSION_BRIEF.md authorizes.
+"""FastAPI routers -- the read-only local API (PRD section 17).
 
-No /charts, /recommendations or /search: those are Milestone 3/4 (PRD section 17
-lists them, the brief explicitly defers them).
+Sessions, timeline, files and stats are Milestones 1-2; search, charts,
+analytics and export extend the same read-only pattern with no new tables.
 """
 
-from backend.api.routers import files, sessions, stats, timeline
+from backend.api.routers import (
+    analytics,
+    charts,
+    export,
+    files,
+    search,
+    sessions,
+    stats,
+    timeline,
+)
 
-__all__ = ["files", "sessions", "stats", "timeline"]
+__all__ = [
+    "analytics",
+    "charts",
+    "export",
+    "files",
+    "search",
+    "sessions",
+    "stats",
+    "timeline",
+]

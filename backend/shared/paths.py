@@ -56,6 +56,22 @@ def hook_queue_path() -> Path:
     return logs_dir() / "claude_hooks.jsonl"
 
 
+def opencode_hook_queue_path() -> Path:
+    """Queue file for OpenCode hooks."""
+    override = os.environ.get("OPENCODE_HOOK_QUEUE")
+    if override:
+        return Path(override).expanduser()
+    return logs_dir() / "opencode_hooks.jsonl"
+
+
+def kilocode_hook_queue_path() -> Path:
+    """Queue file for Kilo Code hooks."""
+    override = os.environ.get("KILOCODE_HOOK_QUEUE")
+    if override:
+        return Path(override).expanduser()
+    return logs_dir() / "kilocode_hooks.jsonl"
+
+
 def tailer_state_path() -> Path:
     """Persisted `{file_path: byte_offset}` map (ADR-002)."""
     return cache_dir() / "tailer_state.json"
@@ -72,6 +88,54 @@ def claude_transcript_root() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".claude" / "projects"
+
+
+def opencode_transcript_root() -> Path:
+    """Where OpenCode writes session JSONL.
+
+    Override with OPENCODE_TRANSCRIPT_ROOT for tests or custom installs.
+    """
+    override = os.environ.get("OPENCODE_TRANSCRIPT_ROOT")
+    if override:
+        return Path(override).expanduser()
+    # Opencode default locations — probe several plausible dirs, the reader
+    # will simply return empty if they don't exist.
+    for cand in (
+        Path.home() / ".local" / "share" / "opencode",
+        Path.home() / ".opencode",
+        Path.home() / ".config" / "opencode",
+    ):
+        if cand.is_dir():
+            return cand
+    return Path.home() / ".local" / "share" / "opencode"
+
+
+def kilocode_transcript_root() -> Path:
+    """Where Kilo Code stores task files (VS Code globalStorage)."""
+    override = os.environ.get("KILOCODE_TRANSCRIPT_ROOT")
+    if override:
+        return Path(override).expanduser()
+    # Platform-dependent VS Code storage
+    candidates = []
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            candidates.append(Path(appdata) / "Code" / "User" / "globalStorage" / "kilocode.kilo-code")
+        # also check Roaming/Code check via home
+        candidates.append(Path.home() / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "kilocode.kilo-code")
+    else:
+        candidates.append(Path.home() / ".config" / "Code" / "User" / "globalStorage" / "kilocode.kilo-code")
+        candidates.append(Path.home() / ".vscode" / "globalStorage" / "kilocode.kilo-code")
+    for cand in candidates:
+        if cand.is_dir():
+            return cand
+    # Fallback — first candidate even if doesn't exist (polling will just be no-op)
+    return candidates[0] if candidates else Path.home() / ".config" / "Code" / "User" / "globalStorage" / "kilocode.kilo-code"
+
+
+def all_hook_queue_paths() -> list[Path]:
+    """All known queue files — used by telemetry to watch every agent."""
+    return [hook_queue_path(), opencode_hook_queue_path(), kilocode_hook_queue_path()]
 
 
 def ensure_directories() -> None:

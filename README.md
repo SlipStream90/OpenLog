@@ -14,10 +14,11 @@ Alpha — local telemetry engine, Claude Code adapter, FastAPI backend, and a
 Next.js dashboard (dark-mode-first, shadcn/ui).
 
 **Already built:** session capture, timeline replay, file analytics, terminal
-analytics, watcher infrastructure, REST API.
+analytics, prompt analytics, charts data, search, JSON/CSV export, watcher
+infrastructure, REST API.
 
-**Not yet built** (Milestones 3–4): productivity scoring, recommendations,
-charts, export, search, Codex CLI adapter.
+**Not yet built** (remaining): productivity scoring, recommendations,
+Codex CLI adapter.
 
 ## Quick start
 
@@ -93,24 +94,32 @@ ai-observatory/
 
 | Endpoint             | Returns                                  |
 | -------------------- | ---------------------------------------- |
-| `GET /sessions`      | Every session, newest first              |
+| `GET /sessions`      | Every session, newest first (`?agent=`, `?date=`) |
 | `GET /session/{id}`  | One session plus aggregate counts        |
 | `GET /timeline/{id}` | Ordered event replay                     |
 | `GET /files`         | Per-file totals across sessions          |
 | `GET /stats`         | Today's aggregates + watcher health      |
+| `GET /search?q=`     | Substring search over files/commands/sessions |
+| `GET /charts?range=` | Per-day sessions/duration/tokens/cost (`7d`, `30d`) |
+| `GET /analytics/prompts` | Prompt count/avg/long-short split    |
+| `GET /analytics/commands` | Command totals/fail-rate/top        |
+| `GET /export?table=&format=` | Table download as JSON or CSV  |
 
 ## Privacy
 
-Prompt **text** is never stored — only its length. Source code, terminal history,
-secrets and environment variables never leave your machine. Nothing in
-`backend/` imports an HTTP client capable of an outbound call. There is a test
-that fails the build if any non-loopback connection is attempted.
+Prompt **text** is never stored — only its length. Terminal commands are stored
+with secrets redacted (`export KEY=…`, `--token …`, `Authorization:` headers,
+embedded credentials); source code, prompt text and environment variables never
+leave your machine. Raw hook payloads are queue files only and are compacted
+once ingested. Nothing in `backend/` imports an HTTP client capable of an
+outbound call. There is a test that fails the build if any non-loopback
+connection is attempted.
 
 ## Tech stack
 
 | Layer    | Stack                                           |
 | -------- | ----------------------------------------------- |
-| Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS, shadcn/ui |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
 | Backend  | FastAPI, SQLAlchemy 2.0, SQLite (WAL mode)      |
 | Runtime  | Python 3.11+, uv                                |
 | Testing  | pytest                                          |
@@ -123,6 +132,13 @@ uv run pytest
 
 # Lint the dashboard
 cd dashboard && npm run lint
+
+# Quality gates (stdlib-only, no new dependencies)
+uv run python scripts/check_duplicates.py --min-lines 25
+uv run python scripts/check_coupling.py
+
+# Write today's Markdown summary (needs the backend running)
+uv run python scripts/daily_summary.py
 ```
 
 ## Caveats

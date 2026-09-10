@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight,
   CheckCircle2,
   Clock3,
   DollarSign,
@@ -14,19 +15,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ApiErrorNotice, EmptyState } from "@/components/api-error-notice";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ApiError,
-  fetchSession,
-  fetchTimeline,
-  type SessionDetail,
-  type TimelineEvent,
-} from "@/lib/api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiError, fetchSession, fetchTimeline, type SessionDetail, type TimelineEvent } from "@/lib/api";
 import { formatClock, formatCost, formatDuration, formatNumber, formatTimestamp } from "@/lib/utils";
 
-// Purely decorative -- keyed on the typed `event_type` field, never on the
-// free-text `label`. An unrecognized type falls back to a plain dot rather
-// than guessing, since new event types are expected to appear over time.
 const EVENT_ICONS: Record<string, LucideIcon> = {
   file_opened: FileEdit,
   file_modified: FileEdit,
@@ -35,145 +27,166 @@ const EVENT_ICONS: Record<string, LucideIcon> = {
   test_passed: CheckCircle2,
   test_failed: XCircle,
   git_commit: GitCommitHorizontal,
+  prompt_submitted: ListTree,
+  response_received: Hash,
+  session_started: Clock3,
+  session_ended: Clock3,
 };
 
 export const dynamic = "force-dynamic";
 
-/**
- * Session detail -- stats header plus the timeline replay (PRD section 14).
- *
- * The timeline is an observable action replay. Labels come from the API
- * verbatim and are rendered as-is; the UI adds no interpretation of what the
- * model was "trying" to do.
- */
-export default async function SessionDetailPage({ params }: { params: { id: string } }) {
-  const id = decodeURIComponent(params.id);
+const agentBadge: Record<string, string> = {
+  claude: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  opencode: "bg-primary/10 text-primary border-primary/20",
+  kilocode: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+};
 
+export default async function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await params;
+  const id = decodeURIComponent(rawId);
   let session: SessionDetail;
   let events: TimelineEvent[];
   try {
     [session, events] = await Promise.all([fetchSession(id), fetchTimeline(id)]);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
-    }
+    if (error instanceof ApiError && error.status === 404) notFound();
     return <ApiErrorNotice message={(error as Error).message} />;
   }
 
   const stats = [
-    { label: "Duration", value: formatDuration(session.duration_seconds), icon: Clock3 },
-    { label: "Tokens", value: formatNumber(session.token_count), icon: Hash },
-    { label: "Files", value: formatNumber(session.file_count), icon: FileEdit },
-    { label: "Commands", value: formatNumber(session.command_count), icon: Terminal },
-    { label: "Tests passed", value: formatNumber(session.test_pass_count), icon: CheckCircle2 },
-    { label: "Tests failed", value: formatNumber(session.test_fail_count), icon: XCircle },
-    { label: "Commits", value: formatNumber(session.commit_count), icon: GitCommitHorizontal },
-    { label: "Cost", value: formatCost(session.estimated_cost), icon: DollarSign },
+    { label: "Duration", value: formatDuration(session.duration_seconds), icon: Clock3, hint: "wall time" },
+    { label: "Tokens", value: formatNumber(session.token_count), icon: Hash, hint: session.model ?? "unknown" },
+    { label: "Files", value: formatNumber(session.file_count), icon: FileEdit, hint: "distinct" },
+    { label: "Commands", value: formatNumber(session.command_count), icon: Terminal, hint: "executions" },
+    { label: "Tests passed", value: formatNumber(session.test_pass_count), icon: CheckCircle2, hint: "∕ " + formatNumber(session.test_fail_count) + " failed" },
+    { label: "Tests failed", value: formatNumber(session.test_fail_count), icon: XCircle, hint: "check logs" },
+    { label: "Commits", value: formatNumber(session.commit_count), icon: GitCommitHorizontal, hint: "git" },
+    { label: "Cost", value: formatCost(session.estimated_cost), icon: DollarSign, hint: "estimated" },
   ];
 
   return (
     <div className="space-y-8">
-      <div>
-        <Link
-          href="/sessions"
-          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
+      <div className="flex flex-col gap-2 border-b pb-5">
+        <Link href="/sessions" className="inline-flex w-fit items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline">
           ← All sessions
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-          {formatTimestamp(session.start_time)}
-        </h1>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">
-          {session.agent} · {session.model ?? "unknown model"} · {session.id}
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">{formatTimestamp(session.start_time)}</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className={`inline-flex rounded-md border px-2 py-1 font-mono text-xs ${agentBadge[session.agent] ?? "bg-muted"}`}>{session.agent}</span>
+              <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs">{session.model ?? "unknown model"}</span>
+              <span className="font-mono text-xs text-muted-foreground">{session.id}</span>
+            </div>
+          </div>
+          <div className="rounded-xl border bg-card px-4 py-3 text-right">
+            <p className="font-mono text-xs text-muted-foreground">Session ID</p>
+            <p className="font-mono text-xs break-all">{session.id.slice(0, 24)}…</p>
+            <p className="mt-1 flex items-center justify-end gap-1 font-mono text-xs text-primary">
+              replayable <ArrowUpRight className="size-3" />
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat, index) => (
           <Card
             key={stat.label}
-            className="animate-in fade-in-0 slide-in-from-bottom-1 duration-300 fill-mode-both"
+            className="group overflow-hidden border bg-card shadow-sm transition-all hover:border-primary/20 hover:shadow-md animate-in fade-in-0 slide-in-from-bottom-1 duration-300 fill-mode-both"
             style={{ animationDelay: `${index * 30}ms` }}
           >
-            <CardHeader className="pb-2">
-              <CardTitle>
-                <stat.icon className="h-3.5 w-3.5" aria-hidden />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <stat.icon className="size-3.5" />
                 {stat.label}
               </CardTitle>
+              <span className="font-mono text-[10px] text-muted-foreground">{stat.hint}</span>
             </CardHeader>
             <CardContent>
-              <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight">
-                {stat.value}
-              </p>
+              <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight">{stat.value}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold tracking-tight">Timeline</h2>
-        {events.length === 0 ? (
-          <EmptyState icon={ListTree} title="No events recorded for this session" />
-        ) : (
-          <ol className="relative border-l border-border pl-6">
-            {events.map((event, index) => {
-              const EventIcon = EVENT_ICONS[event.event_type];
-              return (
-              <li key={`${event.timestamp}-${index}`} className="relative pb-6 last:pb-0">
-                <span
-                  className="absolute -left-[1.9375rem] top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-border bg-card"
-                  aria-hidden
-                >
-                  {EventIcon ? (
-                    <EventIcon className="h-2.5 w-2.5 text-muted-foreground" />
-                  ) : (
-                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                  )}
-                </span>
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <time className="font-mono text-xs tabular-nums text-muted-foreground">
-                    {formatClock(event.timestamp)}
-                  </time>
-                  <span className="text-sm">{event.label}</span>
-                </div>
-                <EventDetail event={event} />
-              </li>
-              );
-            })}
-          </ol>
-        )}
+      <section className="grid gap-6 lg:grid-cols-[1fr_300px]">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              <ListTree className="size-5" />
+              Timeline
+              <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-xs">{events.length}</span>
+            </h2>
+            <span className="font-mono text-xs text-muted-foreground">observable replay • no reasoning exposed</span>
+          </div>
+          {events.length === 0 ? (
+            <EmptyState icon={ListTree} title="No events recorded for this session" />
+          ) : (
+            <div className="rounded-xl border bg-card p-6">
+              <ol className="relative border-l border-border pl-6">
+                {events.map((event, index) => {
+                  const EventIcon = EVENT_ICONS[event.event_type];
+                  const isImportant = ["test_failed", "test_passed", "git_commit", "file_modified"].includes(event.event_type);
+                  return (
+                    <li key={`${event.timestamp}-${index}`} className="relative pb-6 last:pb-0">
+                      <span className={`absolute -left-[1.9375rem] top-0.5 flex size-4 items-center justify-center rounded-full border bg-card ${isImportant ? "border-primary/30 bg-primary/10" : "border-border"}`}>
+                        {EventIcon ? <EventIcon aria-hidden className={`size-2.5 ${isImportant ? "text-primary" : "text-muted-foreground"}`} /> : <span className="size-1.5 rounded-full bg-muted-foreground" />}
+                      </span>
+                      <div className="flex flex-wrap items-baseline gap-x-3">
+                        <time className="font-mono text-xs tabular-nums text-muted-foreground">{formatClock(event.timestamp)}</time>
+                        <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{event.event_type}</span>
+                        <span className="text-sm font-medium">{event.label}</span>
+                      </div>
+                      {event.file && <p className="mt-1 font-mono text-xs text-primary">{event.file}</p>}
+                      <EventDetail event={event} />
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <Card className="bg-secondary/30">
+            <CardHeader>
+              <CardTitle className="text-sm">About this replay</CardTitle>
+              <CardDescription className="font-mono text-xs">Labels come verbatim from the API. No interpretation of model intent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 font-mono text-xs text-muted-foreground">
+              <p>Agent: <span className="text-foreground">{session.agent}</span></p>
+              <p>Model: <span className="text-foreground">{session.model ?? "—"}</span></p>
+              <p>Tokens: <span className="text-foreground">{formatNumber(session.token_count)}</span></p>
+              <p>Prompt text is never stored — only length.</p>
+              <div className="pt-2">
+                <Link href="/sessions" className="font-mono text-xs text-primary hover:underline">Back to sessions</Link>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-dashed">
+            <CardContent className="pt-6 text-center">
+              <p className="font-mono text-xs text-muted-foreground">Need multi-agent filtering?</p>
+              <p className="mt-1 text-sm font-medium">All sessions table supports “claude / opencode / kilo” pills.</p>
+            </CardContent>
+          </Card>
+        </div>
       </section>
     </div>
   );
 }
 
-/** Shows only the small set of metadata that is safe and useful to display. */
 function EventDetail({ event }: { event: TimelineEvent }) {
   const parts: string[] = [];
-
   const added = event.metadata?.lines_added;
   const removed = event.metadata?.lines_removed;
-  if (typeof added === "number" || typeof removed === "number") {
-    parts.push(`+${Number(added ?? 0)} / −${Number(removed ?? 0)}`);
-  }
-
+  if (typeof added === "number" || typeof removed === "number") parts.push(`+${Number(added ?? 0)} / −${Number(removed ?? 0)}`);
   const exitCode = event.metadata?.exit_code;
-  if (typeof exitCode === "number") {
-    parts.push(`exit ${exitCode}`);
-  }
-
-  // prompt_submitted carries length only -- there is no prompt text to leak here.
+  if (typeof exitCode === "number") parts.push(`exit ${exitCode}`);
   const length = event.metadata?.length;
-  if (typeof length === "number") {
-    parts.push(`${length} chars`);
-  }
-
+  if (typeof length === "number") parts.push(`${length} chars`);
   const tokens = event.metadata?.token_count;
-  if (typeof tokens === "number") {
-    parts.push(`${tokens.toLocaleString()} tokens`);
-  }
-
+  if (typeof tokens === "number") parts.push(`${tokens.toLocaleString()} tokens`);
   if (parts.length === 0) return null;
-
   return <p className="mt-1 font-mono text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }

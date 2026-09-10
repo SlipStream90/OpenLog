@@ -5,6 +5,8 @@ Read-only. No endpoint in this package writes to the database.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, time
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession
@@ -47,9 +49,35 @@ def _to_summary(row: Session, file_counts: dict, command_counts: dict) -> Sessio
 
 
 @router.get("/sessions", response_model=SessionListResponse)
-def list_sessions(db: SASession = Depends(get_db)) -> SessionListResponse:
-    """Every session, newest first. Backs the Sessions page table."""
-    rows = db.execute(select(Session).order_by(Session.start_time.desc())).scalars().all()
+def list_sessions(
+    agent: str | None = None,
+    date: str | None = None,
+    db: SASession = Depends(get_db),  # noqa: B008
+) -> SessionListResponse:
+    """Every session, newest first. Backs the Sessions page table.
+
+    `agent` filters to one agent (`claude`, `opencode`, `kilocode`).
+    `date` (YYYY-MM-DD, the user's local day) keeps sessions started that day.
+    A malformed date is a 400, never a silent empty list.
+    """
+    stmt = select(Session).order_by(Session.start_time.desc())
+    if agent:
+        stmt = stmt.where(Session.agent == agent.strip().lower())
+    if date:
+        try:
+            day = datetime.strptime(date.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="date must be YYYY-MM-DD"
+            ) from None
+        now_local = datetime.now().astimezone()
+        start_local = datetime.combine(day, time.min, tzinfo=now_local.tzinfo)
+        end_local = datetime.combine(day, time.max, tzinfo=now_local.tzinfo)
+        stmt = stmt.where(
+            Session.start_time >= start_local.astimezone(UTC),
+            Session.start_time <= end_local.astimezone(UTC),
+        )
+    rows = db.execute(stmt).scalars().all()
     file_counts = _counts_by_session(db, FileRecord)
     command_counts = _counts_by_session(db, Command)
     return SessionListResponse(
@@ -58,7 +86,7 @@ def list_sessions(db: SASession = Depends(get_db)) -> SessionListResponse:
 
 
 @router.get("/session/{session_id}", response_model=SessionDetail)
-def get_session(session_id: str, db: SASession = Depends(get_db)) -> SessionDetail:
+def get_session(session_id: str, db: SASession = Depends(get_db)) -> SessionDetail:  # noqa: B008
     """One session's record plus aggregate counts."""
     row = db.get(Session, session_id)
     if row is None:

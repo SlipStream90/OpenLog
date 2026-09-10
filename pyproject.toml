@@ -28,6 +28,8 @@ dev = [
 
 [project.scripts]
 ai-observatory-hook = "backend.adapters.claude.hook_handler:main"
+ai-observatory-hook-opencode = "backend.adapters.opencode.hook_handler:main"
+ai-observatory-hook-kilocode = "backend.adapters.kilocode.hook_handler:main"
 
 [build-system]
 requires = ["hatchling"]

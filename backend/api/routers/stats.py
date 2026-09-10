@@ -7,17 +7,17 @@ can accidentally render a fabricated zero.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession
 
-from backend.adapters.claude import pricing
 from backend.api.schemas import StatsResponse, WatcherStatusModel
 from backend.database.models import Command, Event, FileRecord, Session
 from backend.database.session import as_utc, get_db
 from backend.shared.events import TEST_EVENT_TYPES
+from backend.shared.pricing import is_priced
 from backend.shared.timeutil import utcnow
 from backend.telemetry.watcher_status import registry
 
@@ -35,14 +35,14 @@ def _today_bounds() -> tuple[datetime, datetime, str]:
     start_local = datetime.combine(now_local.date(), time.min, tzinfo=now_local.tzinfo)
     end_local = datetime.combine(now_local.date(), time.max, tzinfo=now_local.tzinfo)
     return (
-        start_local.astimezone(timezone.utc),
-        end_local.astimezone(timezone.utc),
+        start_local.astimezone(UTC),
+        end_local.astimezone(UTC),
         now_local.date().isoformat(),
     )
 
 
 @router.get("/stats", response_model=StatsResponse)
-def get_stats(db: SASession = Depends(get_db)) -> StatsResponse:
+def get_stats(db: SASession = Depends(get_db)) -> StatsResponse:  # noqa: B008
     start_utc, end_utc, date_label = _today_bounds()
 
     sessions = (
@@ -105,7 +105,7 @@ def get_stats(db: SASession = Depends(get_db)) -> StatsResponse:
         estimated_cost=round(estimated_cost, 4),
         command_count=int(command_count),
         test_count=int(test_count),
-        cost_is_estimated=pricing.is_priced(),
+        cost_is_estimated=is_priced(),
         watchers={
             name: WatcherStatusModel(**data) for name, data in registry.snapshot().items()
         },

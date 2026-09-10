@@ -26,6 +26,15 @@ import re
 from typing import Any
 
 from backend.shared.events import EventSource, EventType, UniversalEvent
+from backend.shared.mapping import (
+    coerce_int as _coerce_int,
+    detect_framework,
+    estimate_line_delta as _estimate_line_delta,
+    make_probe,
+    parse_usage as _parse_usage,
+    relative_file as _relative_file,
+)
+from backend.shared.sanitize import sanitize_command
 from backend.shared.timeutil import parse_timestamp, utcnow
 
 logger = logging.getLogger(__name__)
@@ -54,31 +63,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-def probe(payload: dict[str, Any], logical: str, default: Any = None) -> Any:
-    """Look a logical field up under any of its plausible real names.
-
-    Returns `default` and logs at debug level when nothing matches -- never
-    raises. This is the single mechanism keeping the [UNVERIFIED] schema from
-    being able to crash ingestion.
-    """
-    for alias in FIELD_ALIASES.get(logical, (logical,)):
-        if alias in payload and payload[alias] is not None:
-            return payload[alias]
-    logger.debug("No value for logical field %r in payload keys %s", logical, list(payload))
-    return default
-
-
-def _coerce_int(value: Any) -> int | None:
-    try:
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, (int, float)):
-            return int(value)
-        if isinstance(value, str) and value.strip():
-            return int(value.strip())
-    except (TypeError, ValueError):
-        pass
-    return None
+probe = make_probe(FIELD_ALIASES)
 
 
 # --------------------------------------------------------------------------
@@ -108,6 +93,40 @@ _BUILD_PATTERN = re.compile(
 _GIT_COMMIT_PATTERN = re.compile(r"\bgit\s+(-[^\s]+\s+)*commit\b", re.IGNORECASE)
 
 
+def _map_session_start(payload: dict[str, Any], build, cwd) -> list[UniversalEvent]:
+    return [build(EventType.SESSION_STARTED)]
+
+
+def _map_session_end(payload: dict[str, Any], build, cwd) -> list[UniversalEvent]:
+    return [build(EventType.SESSION_ENDED)]
+
+
+def _map_prompt_submit(payload: dict[str, Any], build, cwd) -> list[UniversalEvent]:
+    prompt = probe(payload, "prompt")
+    length = len(prompt) if isinstance(prompt, str) else 0
+    return [build(EventType.PROMPT_SUBMITTED, metadata={"length": length})]
+
+
+def _map_tool_use_hook(payload: dict[str, Any], build, cwd, normalized_hook: str) -> list[UniversalEvent]:
+    return _map_tool_use(payload, normalized_hook, cwd, build)
+
+
+def _map_unknown_hook(payload: dict[str, Any], hook_name: str, build, cwd) -> list[UniversalEvent]:
+    logger.debug("Dropping unmapped hook event %r", hook_name)
+    return []
+
+
+_HOOK_DISPATCH: dict[str, callable] = {
+    "sessionstart": lambda p, b, c: _map_session_start(p, b, c),
+    "sessionend": lambda p, b, c: _map_session_end(p, b, c),
+    "stop": lambda p, b, c: _map_session_end(p, b, c),
+    "userpromptsubmit": lambda p, b, c: _map_prompt_submit(p, b, c),
+    "pretooluse": lambda p, b, c: _map_tool_use_hook(p, b, c, "pretooluse"),
+    "posttooluse": lambda p, b, c: _map_tool_use_hook(p, b, c, "posttooluse"),
+    "notification": lambda p, b, c: _map_unknown_hook(p, "notification", b, c),
+}
+
+
 def detect_test_framework(command: str) -> str | None:
     """Best-effort framework label for a test command. `None` when unclear.
 
@@ -115,26 +134,7 @@ def detect_test_framework(command: str) -> str | None:
     perfectly good answer -- guessing a framework would put a fabricated value
     into the record.
     """
-    match = _TEST_PATTERN.search(command or "")
-    if not match:
-        return None
-    return re.sub(r"\s+", " ", match.group(0)).strip().lower()
-
-
-def _relative_file(path: Any, cwd: Any) -> str | None:
-    """Render a file path relative to the session's working directory.
-
-    Absolute paths leak the developer's home directory layout into the database
-    and make the same file look like two different files across machines.
-    """
-    if not isinstance(path, str) or not path.strip():
-        return None
-    text = path.strip().replace("\\", "/")
-    if isinstance(cwd, str) and cwd.strip():
-        base = cwd.strip().replace("\\", "/").rstrip("/")
-        if base and text.lower().startswith(base.lower() + "/"):
-            return text[len(base) + 1 :]
-    return text
+    return detect_framework(command, _TEST_PATTERN)
 
 
 # --------------------------------------------------------------------------
@@ -188,29 +188,11 @@ def map_hook_payload(payload: dict[str, Any]) -> list[UniversalEvent]:
 
     normalized = hook_name.strip().lower().replace("_", "")
 
-    if normalized in ("sessionstart",):
-        return [build(EventType.SESSION_STARTED)]
+    handler = _HOOK_DISPATCH.get(normalized)
+    if handler:
+        return handler(payload, build, cwd)
 
-    if normalized in ("sessionend", "stop"):
-        return [build(EventType.SESSION_ENDED)]
-
-    if normalized in ("userpromptsubmit",):
-        prompt = probe(payload, "prompt")
-        # LENGTH ONLY. The prompt text must never reach the database (PRD 21).
-        length = len(prompt) if isinstance(prompt, str) else 0
-        return [build(EventType.PROMPT_SUBMITTED, metadata={"length": length})]
-
-    if normalized in ("pretooluse", "posttooluse"):
-        return _map_tool_use(payload, normalized, cwd, build)
-
-    if normalized in ("notification",):
-        # Not one of PRD section 12's types; intentionally dropped rather than
-        # forced into `warning`.
-        logger.debug("Dropping unmapped hook event %r", hook_name)
-        return []
-
-    logger.debug("Dropping unmapped hook event %r", hook_name)
-    return []
+    return _map_unknown_hook(payload, hook_name, build, cwd)
 
 
 def _map_tool_use(
@@ -259,7 +241,10 @@ def _map_shell_command(
     command = probe(tool_input, "command")
     if not isinstance(command, str) or not command.strip():
         return []
-    command = command.strip()
+    # Redact secrets before anything is stored: PRD section 21. Framework /
+    # build / git classification below only matches tool names, never secret
+    # values, so it is unaffected by redaction.
+    command = sanitize_command(command.strip()) or ""
 
     response = probe(payload, "tool_response")
     exit_code = None
@@ -301,40 +286,16 @@ def _map_shell_command(
     return events
 
 
-def _estimate_line_delta(tool_input: dict[str, Any]) -> tuple[int, int]:
-    """Estimate lines added/removed from an edit tool's input.
-
-    Best-effort only: for an Edit we can diff old vs new string; for a Write of a
-    new file we know only the line count. Where nothing is derivable we return
-    (0, 0) rather than a guess.
-    """
-    old = tool_input.get("old_string") or tool_input.get("oldString")
-    new = tool_input.get("new_string") or tool_input.get("newString")
-    if isinstance(old, str) or isinstance(new, str):
-        old_lines = len(old.splitlines()) if isinstance(old, str) else 0
-        new_lines = len(new.splitlines()) if isinstance(new, str) else 0
-        return max(new_lines - old_lines, 0), max(old_lines - new_lines, 0)
-
-    content = tool_input.get("content")
-    if isinstance(content, str):
-        return len(content.splitlines()), 0
-
-    edits = tool_input.get("edits")
-    if isinstance(edits, list):
-        added = removed = 0
-        for edit in edits:
-            if isinstance(edit, dict):
-                a, r = _estimate_line_delta(edit)
-                added += a
-                removed += r
-        return added, removed
-
-    return 0, 0
+# `_estimate_line_delta` is `backend.shared.mapping.estimate_line_delta`
+# (imported above): the per-agent key tables were unified there.
 
 
 # --------------------------------------------------------------------------
 # Transcript record mapping
 # --------------------------------------------------------------------------
+
+
+# `_parse_usage` is `backend.shared.mapping.parse_usage` (imported above).
 
 
 def map_transcript_record(record: dict[str, Any]) -> list[UniversalEvent]:
@@ -362,26 +323,7 @@ def map_transcript_record(record: dict[str, Any]) -> list[UniversalEvent]:
     if not isinstance(usage, dict) and model is None:
         return []
 
-    token_count = None
-    input_tokens = output_tokens = 0
-    if isinstance(usage, dict):
-        counts = {
-            key: _coerce_int(usage.get(key))
-            for key in (
-                "input_tokens",
-                "output_tokens",
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-            )
-        }
-        present = [v for v in counts.values() if v is not None]
-        token_count = sum(present) if present else None
-        # Cache reads/writes are billed against the input side.
-        input_tokens = sum(
-            counts[k] or 0
-            for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-        )
-        output_tokens = counts["output_tokens"] or 0
+    token_count, input_tokens, output_tokens = _parse_usage(usage)
 
     timestamp = parse_timestamp(probe(record, "timestamp"))
 

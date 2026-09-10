@@ -7,13 +7,13 @@ centralized here rather than repeated per adapter.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
 def utcnow() -> datetime:
     """Aware UTC now. Use instead of the deprecated `datetime.utcnow()`."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def parse_timestamp(value: Any, *, default: datetime | None = None) -> datetime:
@@ -31,7 +31,7 @@ def parse_timestamp(value: Any, *, default: datetime | None = None) -> datetime:
         # under 1e11, so a larger magnitude means milliseconds.
         seconds = value / 1000.0 if value > 1e11 else float(value)
         try:
-            parsed = datetime.fromtimestamp(seconds, tz=timezone.utc)
+            parsed = datetime.fromtimestamp(seconds, tz=UTC)
         except (OverflowError, OSError, ValueError):
             return fallback
     elif isinstance(value, str) and value.strip():
@@ -49,4 +49,4 @@ def parse_timestamp(value: Any, *, default: datetime | None = None) -> datetime:
     if parsed.tzinfo is None:
         # An agent emitting a naive timestamp means local wall-clock time.
         parsed = parsed.astimezone()
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)

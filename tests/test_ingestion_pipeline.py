@@ -302,3 +302,22 @@ def test_stopping_a_pipeline_that_never_started_is_safe():
         await pipeline.stop()
 
     asyncio.run(_main())
+
+
+def test_poison_event_skips_only_itself(temp_home):
+    """One unpersistable event must not abort its batch-mates."""
+    good_start = _event(session_id="s-poison", event=EventType.SESSION_STARTED)
+    good_end = _event(session_id="s-poison", event=EventType.SESSION_ENDED)
+    # Garbage line counts blow up int() inside _write_file_record.
+    poison = _event(
+        session_id="s-poison",
+        event=EventType.FILE_MODIFIED,
+        metadata={"lines_added": "not-a-number"},
+    )
+
+    written = persist_events([good_start, poison, good_end])
+
+    assert written == 2
+    with session_scope() as db:
+        rows = db.execute(select(Event).where(Event.session_id == "s-poison")).all()
+        assert len(rows) == 2

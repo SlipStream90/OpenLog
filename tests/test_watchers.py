@@ -32,7 +32,11 @@ from backend.adapters.claude.adapter import ClaudeAdapter
 from backend.shared import paths
 from backend.telemetry import queue_tailer, transcript_poller
 from backend.telemetry.offsets import OffsetStore
-from backend.telemetry.queue_tailer import QueueTailer, read_new_lines
+from backend.telemetry.queue_tailer import (
+    QueueTailer,
+    compact_processed_prefix,
+    read_new_lines,
+)
 from backend.telemetry.transcript_poller import TranscriptPoller
 from backend.telemetry.watcher_status import registry
 
@@ -467,3 +471,28 @@ def test_transcript_poller_is_healthy_with_no_transcripts_at_all(temp_home):
 def tmp_state(home: Path) -> Path:
     """Offset file inside the test's temp home, never the developer's cache."""
     return home / "cache" / "tailer_state.json"
+
+
+# ==========================================================================
+# queue_tailer.compact_processed_prefix
+# ==========================================================================
+
+
+def test_compaction_reclaims_ingested_bytes(tmp_path):
+    """Processed prefix is dropped; the unread tail survives byte-identical."""
+    queue = tmp_path / "q.jsonl"
+    _append_json_lines(queue, {"n": 1}, {"n": 2}, {"n": 3})
+    size = queue.stat().st_size
+    offset = len((json.dumps({"n": 1}) + "\n").encode("utf-8"))
+
+    assert compact_processed_prefix(queue, offset, threshold=5) == 0
+    assert queue.stat().st_size == size - offset
+    records, _ = read_new_lines(queue, 0)
+    assert records == [{"n": 2}, {"n": 3}]
+
+
+def test_compaction_skips_small_files(tmp_path):
+    queue = tmp_path / "q.jsonl"
+    _append_json_lines(queue, {"n": 1})
+    assert compact_processed_prefix(queue, queue.stat().st_size, threshold=10**9) == queue.stat().st_size
+    assert len(read_new_lines(queue, 0)[0]) == 1

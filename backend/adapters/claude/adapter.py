@@ -79,7 +79,7 @@ class ClaudeAdapter:
             return []
         try:
             events = event_mapper.map_payload(raw, source)
-        except Exception:  # noqa: BLE001 -- ADR-009: degrade, never crash ingestion
+        except Exception:
             logger.exception("Failed to normalize %s payload; dropping it", source)
             return []
 

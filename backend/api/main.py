@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routers import files, sessions, stats, timeline
+from backend.api.routers import analytics, charts, export, files, search, sessions, stats, timeline
 from backend.database.session import init_db
 from backend.telemetry import TelemetryEngine
 
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         engine = TelemetryEngine()
         try:
             await engine.start()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("Telemetry engine failed to start; API continues serving")
             engine = None
     app.state.telemetry = engine
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
         if engine is not None:
             try:
                 await engine.stop()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("Telemetry engine shutdown was not clean")
 
 
@@ -83,6 +83,10 @@ def create_app() -> FastAPI:
     app.include_router(timeline.router)
     app.include_router(files.router)
     app.include_router(stats.router)
+    app.include_router(search.router)
+    app.include_router(charts.router)
+    app.include_router(analytics.router)
+    app.include_router(export.router)
     return app
 
 

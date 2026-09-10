@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import timezone
+from datetime import UTC
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session as SASession
@@ -127,5 +127,5 @@ def as_utc(value):
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

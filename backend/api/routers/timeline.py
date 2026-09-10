@@ -15,7 +15,7 @@ router = APIRouter(tags=["timeline"])
 
 
 @router.get("/timeline/{session_id}", response_model=TimelineResponse)
-def get_timeline(session_id: str, db: SASession = Depends(get_db)) -> TimelineResponse:
+def get_timeline(session_id: str, db: SASession = Depends(get_db)) -> TimelineResponse:  # noqa: B008
     """Ordered event sequence for one session.
 
     404s on an unknown session rather than returning an empty timeline, so the

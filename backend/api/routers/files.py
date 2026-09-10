@@ -14,7 +14,7 @@ router = APIRouter(tags=["files"])
 
 
 @router.get("/files", response_model=FileListResponse)
-def list_files(db: SASession = Depends(get_db)) -> FileListResponse:
+def list_files(db: SASession = Depends(get_db)) -> FileListResponse:  # noqa: B008
     """Per-filename totals across every session, most-modified first."""
     rows = db.execute(
         select(

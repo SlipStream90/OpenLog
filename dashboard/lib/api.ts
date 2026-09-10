@@ -99,8 +99,15 @@ export async function fetchStats(): Promise<Stats> {
   return getJson<Stats>("/stats");
 }
 
-export async function fetchSessions(): Promise<SessionSummary[]> {
-  const body = await getJson<{ sessions: SessionSummary[] }>("/sessions");
+export async function fetchSessions(opts?: {
+  agent?: string;
+  date?: string;
+}): Promise<SessionSummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.agent) params.set("agent", opts.agent);
+  if (opts?.date) params.set("date", opts.date);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const body = await getJson<{ sessions: SessionSummary[] }>(`/sessions${suffix}`);
   return body.sessions;
 }
 
@@ -113,4 +120,79 @@ export async function fetchTimeline(id: string): Promise<TimelineEvent[]> {
     `/timeline/${encodeURIComponent(id)}`,
   );
   return body.events;
+}
+
+export interface FileAggregate {
+  filename: string;
+  session_count: number;
+  total_additions: number;
+  total_deletions: number;
+  total_modifications: number;
+  last_modified: string | null;
+}
+
+export async function fetchFiles(): Promise<FileAggregate[]> {
+  const body = await getJson<{ files: FileAggregate[] }>("/files");
+  return body.files;
+}
+
+export interface ChartPoint {
+  date: string;
+  sessions: number;
+  seconds: number;
+  tokens: number;
+  cost: number;
+}
+
+export async function fetchCharts(range: "7d" | "30d" = "7d"): Promise<ChartPoint[]> {
+  const body = await getJson<{ range: string; points: ChartPoint[] }>(
+    `/charts?range=${range}`,
+  );
+  return body.points;
+}
+
+export interface PromptStats {
+  count: number;
+  avg_length: number;
+  max_length: number;
+  long_count: number;
+  short_count: number;
+  per_day: { date: string; count: number; avg_length: number }[];
+}
+
+export async function fetchPromptStats(): Promise<PromptStats> {
+  return getJson<PromptStats>("/analytics/prompts");
+}
+
+export interface CommandStats {
+  total: number;
+  succeeded: number;
+  failed: number;
+  fail_rate: number;
+  git_count: number;
+  build_count: number;
+  top: { command: string; count: number; fail_count: number }[];
+}
+
+export async function fetchCommandStats(): Promise<CommandStats> {
+  return getJson<CommandStats>("/analytics/commands");
+}
+
+export interface SearchResults {
+  query: string;
+  files: string[];
+  commands: { command: string; session_id: string; timestamp: string; exit_code: number | null }[];
+  sessions: { id: string; agent: string; start_time: string }[];
+}
+
+export async function searchAll(query: string): Promise<SearchResults> {
+  return getJson<SearchResults>(`/search?q=${encodeURIComponent(query)}`);
+}
+
+/** Direct download URL for a table export (hits the local API, not Next). */
+export function exportHref(
+  table: "sessions" | "events" | "files" | "commands" | "prompts",
+  format: "json" | "csv",
+): string {
+  return `${API_BASE}/export?table=${table}&format=${format}`;
 }

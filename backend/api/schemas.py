@@ -95,7 +95,6 @@ class WatcherStatusModel(BaseModel):
     last_success_at: str | None = None
     last_error: str | None = None
 
-
 class StatsResponse(BaseModel):
     """Today's raw aggregates. No productivity score -- deliberately absent."""
 
@@ -107,8 +106,88 @@ class StatsResponse(BaseModel):
     command_count: int
     test_count: int
     #: True only when the user has supplied a pricing table. Lets the UI say
-    #: "not priced" instead of implying a real $0.00. See adapters/claude/pricing.py.
+    #: "not priced" instead of implying a real $0.00. See backend/shared/pricing.py.
     cost_is_estimated: bool = False
     #: Watcher health (ADR-004) -- satisfies PRD section 25's "notify the user in
     #: the UI" without adding a sixth endpoint the brief does not authorize.
     watchers: dict[str, WatcherStatusModel] = {}
+
+
+class SearchSession(_Base):
+    id: str
+    agent: str
+    start_time: datetime
+
+    @field_serializer("start_time")
+    def _ser_dt(self, value: datetime | None, _info) -> str | None:
+        return _iso(value)
+
+
+class SearchCommand(_Base):
+    command: str
+    session_id: str
+    timestamp: datetime
+    exit_code: int | None = None
+
+    @field_serializer("timestamp")
+    def _ser_dt(self, value: datetime, _info) -> str | None:
+        return _iso(value)
+
+
+class SearchResponse(BaseModel):
+    """Substring search across filenames, commands and session ids (PRD §14)."""
+
+    query: str
+    files: list[str] = []
+    commands: list[SearchCommand] = []
+    sessions: list[SearchSession] = []
+
+
+class ChartPoint(BaseModel):
+    date: str
+    sessions: int = 0
+    seconds: float = 0.0
+    tokens: int = 0
+    cost: float = 0.0
+
+
+class ChartsResponse(BaseModel):
+    """Per-day aggregates backing the Home charts (PRD §14)."""
+
+    range: str
+    points: list[ChartPoint] = []
+
+
+class PromptDayStat(BaseModel):
+    date: str
+    count: int = 0
+    avg_length: float = 0.0
+
+
+class PromptStatsResponse(BaseModel):
+    """Prompt analytics from length-only records (PRD §14)."""
+
+    count: int = 0
+    avg_length: float = 0.0
+    max_length: int = 0
+    long_count: int = 0
+    short_count: int = 0
+    per_day: list[PromptDayStat] = []
+
+
+class TopCommand(BaseModel):
+    command: str
+    count: int = 0
+    fail_count: int = 0
+
+
+class CommandStatsResponse(BaseModel):
+    """Terminal analytics from the commands table (PRD §14)."""
+
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    fail_rate: float = 0.0
+    git_count: int = 0
+    build_count: int = 0
+    top: list[TopCommand] = []
